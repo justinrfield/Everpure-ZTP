@@ -1,0 +1,15 @@
+[Unit]
+Description=Internal File Server (HTTP)
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/home/atcadmin/fileserver
+Environment=FILE_SERVER_ROOT=/home/atcadmin/fileserver/files
+ExecStart=/usr/bin/python3 /home/atcadmin/fileserver/app.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
