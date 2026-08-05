@@ -188,11 +188,124 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 
-<!-- ZTP PureSoftwareInstall -->
+<!-- DHCP Server -->
+<div class="card mt-3">
+  <div class="card-header d-flex justify-content-between align-items-center"
+       style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#dhcpCollapse">
+    <span class="fw-semibold"><i class="bi bi-router text-success me-1"></i> DHCP Server</span>
+    <span id="dhcpHeaderBadge"></span>
+    <i class="bi bi-chevron-down"></i>
+  </div>
+  <div class="collapse" id="dhcpCollapse">
+    <div class="card-body">
+
+      <div class="alert alert-info py-2 mb-2">
+        <i class="bi bi-info-circle-fill me-1"></i>
+        <strong>Linux VM installs only.</strong> The DHCP server requires direct access to the host network interface and will not function when running inside a Docker container on macOS or Windows. Use this feature only when the application is installed directly on a Linux VM or bare-metal host.
+      </div>
+      <div class="alert alert-warning py-2 mb-3">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+        <strong>Warning:</strong> Only enable on isolated private networks. A DHCP server on a shared network will conflict with existing DHCP servers and disrupt other clients.
+      </div>
+
+      <!-- Status bar -->
+      <div class="d-flex align-items-center gap-3 mb-3 flex-wrap">
+        <span class="fw-semibold">Status:</span>
+        <span id="dhcpStatusBadge" class="badge fs-6 bg-secondary">Loading...</span>
+        <button class="btn btn-sm btn-outline-secondary" onclick="loadDhcpInterfaces(); loadDhcpStatus();">
+          <i class="bi bi-arrow-clockwise me-1"></i> Refresh
+        </button>
+        <button class="btn btn-sm btn-outline-warning fw-semibold" id="dhcpRestartBtn"
+                onclick="dhcpRestart(this)" style="display:none">
+          <i class="bi bi-arrow-repeat me-1"></i> Restart DHCP
+        </button>
+      </div>
+
+      <!-- Config form -->
+      <div id="dhcpConfigForm">
+        <div class="row g-3">
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Network Interface</label>
+            <select id="dhcpIface" class="form-select" onchange="updateIfaceIpDisplay()">
+              <option value="">Loading interfaces…</option>
+            </select>
+            <div id="dhcpIfaceIpDisplay" class="form-text mt-1"></div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Subnet</label>
+            <input type="text" id="dhcpSubnet" class="form-control" placeholder="192.168.1.0/24" value="192.168.1.0/24">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label fw-semibold">Range Start</label>
+            <input type="text" id="dhcpRangeStart" class="form-control" placeholder="192.168.1.11" value="192.168.1.11">
+          </div>
+          <div class="col-md-2">
+            <label class="form-label fw-semibold">Range End</label>
+            <input type="text" id="dhcpRangeEnd" class="form-control" placeholder="192.168.1.30" value="192.168.1.30">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label fw-semibold">Server IP Address <small class="text-muted fw-normal">— CIDR notation</small></label>
+            <input type="text" id="dhcpServerIp" class="form-control" placeholder="192.168.1.1/24" value="192.168.1.1/24">
+            <div class="form-text">Assigned to the selected interface on start, removed on stop.</div>
+          </div>
+          <div class="col-12">
+            <div class="form-text"><i class="bi bi-clock me-1"></i>Lease time is fixed at <strong>60 minutes</strong>.</div>
+          </div>
+          <div class="col-12">
+            <button class="btn btn-success fw-semibold" id="dhcpStartBtn" onclick="dhcpStart(this)">
+              <i class="bi bi-play-fill me-1"></i> Enable DHCP Server
+            </button>
+            <button class="btn btn-danger fw-semibold ms-2" id="dhcpStopBtn" onclick="dhcpStop(this)" style="display:none">
+              <i class="bi bi-stop-fill me-1"></i> Disable DHCP Server
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Active leases -->
+      <div class="mt-3">
+        <button class="btn btn-outline-secondary btn-sm fw-semibold" onclick="loadDhcpLeases(this)">
+          <i class="bi bi-table me-1"></i> Show Active Leases
+        </button>
+        <button class="btn btn-outline-secondary btn-sm fw-semibold ms-2" onclick="loadDhcpLogs(this)">
+          <i class="bi bi-terminal me-1"></i> Show Logs
+        </button>
+        <div id="dhcpLeasesPanel" class="mt-2 d-none">
+          <hr>
+          <p class="fw-semibold mb-2">Active DHCP Leases</p>
+          <div class="table-responsive">
+            <table class="table table-sm table-bordered align-middle mb-0">
+              <thead class="table-dark">
+                <tr>
+                  <th>IP Address</th>
+                  <th>MAC Address</th>
+                  <th>Hostname</th>
+                  <th>Lease Expiry</th>
+                </tr>
+              </thead>
+              <tbody id="dhcpLeasesBody">
+                <tr><td colspan="4" class="text-muted fst-italic text-center">No leases found.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div id="dhcpLogsPanel" class="mt-2 d-none">
+          <hr>
+          <p class="fw-semibold mb-2">dnsmasq Logs <small class="text-muted fw-normal">(last 100 lines)</small></p>
+          <pre id="dhcpLogsBody" class="bg-dark text-light rounded p-3"
+               style="max-height:300px;overflow:auto;font-size:0.8rem;white-space:pre-wrap">(no log output)</pre>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ZTP FlashArray Install -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center"
        style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#ztpInstall">
-    <span class="fw-semibold"><i class="bi bi-lightning-charge text-warning me-1"></i> ZTP PureSoftwareInstall</span>
+    <span class="fw-semibold"><i class="bi bi-lightning-charge text-warning me-1"></i> ZTP FlashArray Install</span>
     <i class="bi bi-chevron-down"></i>
   </div>
   <div class="collapse" id="ztpInstall">
@@ -293,11 +406,11 @@ HTML = """<!DOCTYPE html>
 </div>
 
 
-<!-- ZTP PureInitialize FlashArray -->
+<!-- ZTP FlashArray Initialize -->
 <div class="card mt-3">
   <div class="card-header d-flex justify-content-between align-items-center"
        style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#ztpInitCollapse">
-    <span class="fw-semibold"><i class="bi bi-hdd-rack text-info me-1"></i> ZTP PureInitialize FlashArray</span>
+    <span class="fw-semibold"><i class="bi bi-hdd-rack text-info me-1"></i> ZTP FlashArray Initialize</span>
     <i class="bi bi-chevron-down"></i>
   </div>
   <div class="collapse" id="ztpInitCollapse">
@@ -893,12 +1006,15 @@ HTML = """<!DOCTYPE html>
           <button class="btn btn-info fw-semibold text-white" onclick="runZtpInitialize(this)">
             <i class="bi bi-hdd-rack me-1"></i> Send Initialize Config
           </button>
-          <button class="btn btn-outline-info fw-semibold" onclick="previewInitPayload()">
+          <button class="btn btn-outline-info fw-semibold" onclick="previewInitPayload(this)">
             <i class="bi bi-eye me-1"></i> Preview JSON
           </button>
-          <button class="btn btn-outline-secondary fw-semibold" onclick="downloadInitPayload()">
+          <button class="btn btn-outline-secondary fw-semibold" onclick="downloadInitPayload(this)">
             <i class="bi bi-download me-1"></i> Download JSON
           </button>
+        </div>
+        <div id="initValidationMsg" class="col-12 d-none">
+          <div class="alert alert-danger py-2 mb-0"></div>
         </div>
       </div>
 
@@ -907,7 +1023,7 @@ HTML = """<!DOCTYPE html>
         <hr>
         <div class="d-flex align-items-center justify-content-between mb-2">
           <span class="fw-semibold">Payload Preview</span>
-          <button class="btn btn-sm btn-outline-secondary" onclick="downloadInitPayload()">
+          <button class="btn btn-sm btn-outline-secondary" onclick="downloadInitPayload(this)">
             <i class="bi bi-download me-1"></i> Download JSON
           </button>
         </div>
@@ -928,6 +1044,9 @@ HTML = """<!DOCTYPE html>
     </div>
   </div>
 </div>
+
+
+
 
 
 </div><!-- /container -->
@@ -1139,8 +1258,23 @@ function importInitPayload(input) {
   reader.readAsText(file);
 }
 
-function buildInitPayload() {
-  const ip        = document.getElementById('initIp').value.trim();
+function _showInitError(msg) {
+  const wrap = document.getElementById('initValidationMsg');
+  if (!wrap) { alert(msg); return; }
+  const alertEl = wrap.querySelector('.alert');
+  if (alertEl) alertEl.textContent = msg;
+  wrap.classList.remove('d-none');
+  wrap.scrollIntoView({ block: 'nearest' });
+}
+
+function _clearInitError() {
+  const el = document.getElementById('initValidationMsg');
+  if (el) el.classList.add('d-none');
+}
+
+// Builds just the JSON payload. Does NOT require the ZTP IP (used by Preview/Download).
+function buildPayloadOnly() {
+  _clearInitError();
   const n         = document.querySelector('input[name="initIfaceMode"]:checked').value;
   const arrayName = document.getElementById('initArrayName').value.trim();
   const ct0addr   = document.getElementById('initCt0Addr').value.trim();
@@ -1159,24 +1293,29 @@ function buildInitPayload() {
   const smtpRelay = document.getElementById('initSmtpRelay').value.trim();
   const smtpSender= document.getElementById('initSmtpDomain').value.trim();
 
-  if (!ip || !arrayName || !ct0addr || !ct0mask || !ct0gw ||
+  if (!arrayName || !ct0addr || !ct0mask || !ct0gw ||
       !ct1addr || !ct1mask || !ct1gw || !viraddr || !virmask || !virgw || !ntp || !tz) {
-    alert('All required fields must be filled in.'); return null;
+    _showInitError('Array name, all IP/mask/gateway fields, NTP, and timezone are required.');
+    return null;
   }
   if (!dnsDomain || !dnsNs) {
-    alert('DNS Domain and Nameservers are required.'); return null;
+    _showInitError('DNS Domain and Nameservers are required.');
+    return null;
   }
   if (!smtpRelay || !smtpSender) {
-    alert('SMTP Relay Host and Sender Domain are required.'); return null;
+    _showInitError('SMTP Relay Host and Sender Domain are required.');
+    return null;
   }
   if (!document.getElementById('initEulaAccepted').checked) {
-    alert('You must accept the EULA to proceed.'); return null;
+    _showInitError('You must accept the EULA to proceed.');
+    return null;
   }
   const eulaName  = document.getElementById('initEulaName').value.trim();
   const eulaTitle = document.getElementById('initEulaTitle').value.trim();
   const eulaOrg   = document.getElementById('initEulaOrg').value.trim();
   if (!eulaName || !eulaTitle || !eulaOrg) {
-    alert('EULA full name, job title, and organization are required.'); return null;
+    _showInitError('EULA full name, job title, and organization are required.');
+    return null;
   }
 
   const emails = document.getElementById('initAlertEmails').value.trim();
@@ -1203,29 +1342,68 @@ function buildInitPayload() {
   };
 
   if (emails) payload.alert_emails = emails.split(',').map(s => s.trim()).filter(Boolean);
+  return payload;
+}
 
+// Builds payload + validates ZTP IP. Used by Send Initialize Config.
+function buildInitPayload() {
+  const ip = document.getElementById('initIp').value.trim();
+  if (!ip) {
+    _showInitError('Controller 1 ZTP IP is required to send the initialize config.');
+    return null;
+  }
+  const payload = buildPayloadOnly();
+  if (!payload) return null;
   return { ip, payload };
 }
 
-function previewInitPayload() {
-  const result = buildInitPayload();
-  if (!result) return;
-  const preview = document.getElementById('initPayloadPreview');
-  preview.classList.remove('d-none');
-  document.getElementById('initPayloadBody').textContent = JSON.stringify(result.payload, null, 2);
-  preview.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+function previewInitPayload(btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Building...';
+  try {
+    const payload = buildPayloadOnly();
+    if (!payload) {
+      if (btn) btn.innerHTML = orig;
+      return;
+    }
+    const bodyEl = document.getElementById('initPayloadBody');
+    const preview = document.getElementById('initPayloadPreview');
+    if (!bodyEl || !preview) { alert('Preview elements not found — please reload the page.'); if (btn) btn.innerHTML = orig; return; }
+    bodyEl.textContent = JSON.stringify(payload, null, 2);
+    preview.style.display = 'block';
+    preview.classList.remove('d-none');
+    preview.scrollIntoView({ block: 'nearest' });
+    if (btn) { btn.innerHTML = '<i class="bi bi-check2 me-1"></i> Preview shown below'; setTimeout(() => { btn.innerHTML = orig; }, 3000); }
+  } catch(e) {
+    alert('Preview error: ' + e.message);
+    if (btn) btn.innerHTML = orig;
+  }
 }
 
-function downloadInitPayload() {
-  const result = buildInitPayload();
-  if (!result) return;
-  const blob = new Blob([JSON.stringify(result.payload, null, 2)], { type: 'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `initialize-config-${result.payload.array_name || 'flasharray'}.json`;
-  a.click();
-  URL.revokeObjectURL(url);
+function downloadInitPayload(btn) {
+  const orig = btn ? btn.innerHTML : '';
+  if (btn) btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Preparing...';
+  try {
+    const payload = buildPayloadOnly();
+    if (!payload) {
+      if (btn) btn.innerHTML = orig;
+      return;
+    }
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = (payload.array_name || 'flasharray') + '-initialize-config.json';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    if (btn) { btn.innerHTML = '<i class="bi bi-check2 me-1"></i> Downloaded'; setTimeout(() => { btn.innerHTML = orig; }, 3000); }
+  } catch(e) {
+    alert('Download error: ' + e.message);
+    if (btn) btn.innerHTML = orig;
+  }
 }
 
 async function runZtpInitialize(btn) {
@@ -1283,6 +1461,222 @@ function copyLink(btn, relPath) {
     confirm();
   }
 }
+
+// ── DHCP Server ──────────────────────────────────────────────────────────────
+
+async function loadDhcpStatus() {
+  const badge = document.getElementById('dhcpStatusBadge');
+  const headerBadge = document.getElementById('dhcpHeaderBadge');
+  let data;
+  try {
+    const resp = await fetch('/dhcp-status');
+    data = await resp.json();
+  } catch (err) {
+    badge.textContent = 'Error';
+    badge.className = 'badge fs-6 bg-danger';
+    if (headerBadge) headerBadge.innerHTML = '<span class="badge bg-danger ms-2">Error</span>';
+    console.error('loadDhcpStatus failed:', err);
+    return;
+  }
+  const stopBtn    = document.getElementById('dhcpStopBtn');
+  const startBtn   = document.getElementById('dhcpStartBtn');
+  const restartBtn = document.getElementById('dhcpRestartBtn');
+
+  if (data.running) {
+    badge.textContent = 'Running';
+    badge.className = 'badge fs-6 bg-success';
+    headerBadge.innerHTML = '<span class="badge bg-success ms-2">Running</span>';
+    stopBtn.style.display = '';
+    startBtn.style.display = 'none';
+    restartBtn.style.display = '';
+    if (data.config) {
+      document.getElementById('dhcpIface').value      = data.config.interface   || '';
+      document.getElementById('dhcpSubnet').value     = data.config.subnet      || '';
+      document.getElementById('dhcpRangeStart').value = data.config.range_start || '';
+      document.getElementById('dhcpRangeEnd').value   = data.config.range_end   || '';
+      document.getElementById('dhcpServerIp').value   = data.config.server_ip   || '';
+      updateIfaceIpDisplay();
+    }
+  } else {
+    badge.textContent = 'Stopped';
+    badge.className = 'badge fs-6 bg-secondary';
+    headerBadge.innerHTML = '<span class="badge bg-secondary ms-2">Stopped</span>';
+    stopBtn.style.display = 'none';
+    startBtn.style.display = '';
+    restartBtn.style.display = 'none';
+    if (data.config) {
+      document.getElementById('dhcpIface').value      = data.config.interface   || '';
+      document.getElementById('dhcpSubnet').value     = data.config.subnet      || '';
+      document.getElementById('dhcpRangeStart').value = data.config.range_start || '';
+      document.getElementById('dhcpRangeEnd').value   = data.config.range_end   || '';
+      document.getElementById('dhcpServerIp').value   = data.config.server_ip   || '';
+      updateIfaceIpDisplay();
+    }
+  }
+}
+
+let _dhcpIfaceMap = {};
+
+async function loadDhcpInterfaces() {
+  const sel = document.getElementById('dhcpIface');
+  const currentVal = sel.value;
+  _dhcpIfaceMap = {};
+  let data;
+  try {
+    const resp = await fetch('/dhcp-interfaces');
+    data = await resp.json();
+  } catch (err) {
+    sel.innerHTML = '<option value="">(error loading interfaces)</option>';
+    console.error('loadDhcpInterfaces failed:', err);
+    return;
+  }
+  if (data.error && (!data.interfaces || !data.interfaces.length)) {
+    sel.innerHTML = '<option value="">(error: ' + data.error + ')</option>';
+    return;
+  }
+  sel.innerHTML = '<option value="">Select interface...</option>';
+  (data.interfaces || []).forEach(iface => {
+    _dhcpIfaceMap[iface.name] = iface.addresses || [];
+    const opt = document.createElement('option');
+    opt.value = iface.name;
+    const addrs = iface.addresses && iface.addresses.length ? ' - ' + iface.addresses.join(', ') : '';
+    opt.textContent = iface.name + addrs;
+    sel.appendChild(opt);
+  });
+  if (currentVal) sel.value = currentVal;
+  updateIfaceIpDisplay();
+}
+
+function updateIfaceIpDisplay() {
+  const sel = document.getElementById('dhcpIface');
+  const display = document.getElementById('dhcpIfaceIpDisplay');
+  const iface = sel.value;
+  const addrs = _dhcpIfaceMap[iface];
+  if (iface && addrs && addrs.length) {
+    display.innerHTML = '<i class="bi bi-ethernet me-1 text-info"></i><strong>Current IP:</strong> ' +
+      addrs.map(a => '<code>' + a + '</code>').join(', ');
+  } else if (iface) {
+    display.innerHTML = '<span class="text-muted fst-italic">No IP address assigned</span>';
+  } else {
+    display.innerHTML = '';
+  }
+}
+
+async function dhcpStart(btn) {
+  const iface    = document.getElementById('dhcpIface').value.trim();
+  const subnet   = document.getElementById('dhcpSubnet').value.trim();
+  const start    = document.getElementById('dhcpRangeStart').value.trim();
+  const end      = document.getElementById('dhcpRangeEnd').value.trim();
+  const serverIp = document.getElementById('dhcpServerIp').value.trim();
+  if (!iface || !subnet || !start || !end || !serverIp) {
+    alert('Interface, subnet, range start, range end, and server IP address are all required.'); return;
+  }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting…';
+  try {
+    const resp = await fetch('/dhcp-start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ interface: iface, subnet, range_start: start, range_end: end, server_ip: serverIp })
+    });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); }
+    await loadDhcpStatus();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-play-fill me-1"></i> Enable DHCP Server';
+  }
+}
+
+async function dhcpStop(btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Stopping…';
+  try {
+    const resp = await fetch('/dhcp-stop', { method: 'POST' });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); }
+    await loadDhcpStatus();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-stop-fill me-1"></i> Disable DHCP Server';
+  }
+}
+
+async function dhcpRestart(btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Restarting…';
+  try {
+    const resp = await fetch('/dhcp-restart', { method: 'POST' });
+    const data = await resp.json();
+    if (data.error) { alert('Error: ' + data.error); }
+    await loadDhcpStatus();
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-repeat me-1"></i> Restart DHCP';
+  }
+}
+
+async function loadDhcpLeases(btn) {
+  const panel = document.getElementById('dhcpLeasesPanel');
+  const tbody = document.getElementById('dhcpLeasesBody');
+  panel.classList.remove('d-none');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Loading…';
+  try {
+    const resp = await fetch('/dhcp-leases');
+    const data = await resp.json();
+    const leases = data.leases || [];
+    if (!leases.length) {
+      tbody.innerHTML = '<tr><td colspan="4" class="text-muted fst-italic text-center">No active leases.</td></tr>';
+    } else {
+      tbody.innerHTML = leases.map(l => `
+        <tr>
+          <td><code>${l.ip}</code></td>
+          <td><code>${l.mac}</code></td>
+          <td>${l.hostname || '<span class="text-muted">—</span>'}</td>
+          <td>${l.expiry}</td>
+        </tr>`).join('');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-table me-1"></i> Show Active Leases';
+  }
+}
+
+async function loadDhcpLogs(btn) {
+  const panel = document.getElementById('dhcpLogsPanel');
+  const body  = document.getElementById('dhcpLogsBody');
+  panel.classList.remove('d-none');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Loading...';
+  try {
+    const resp = await fetch('/dhcp-logs');
+    const data = await resp.json();
+    if (data.error) {
+      body.textContent = 'Error reading logs: ' + data.error;
+    } else {
+      body.textContent = (data.lines || []).join('\\n') || '(no log output yet — start the DHCP server first)';
+    }
+  } catch (err) {
+    body.textContent = 'Failed to fetch logs: ' + err;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-terminal me-1"></i> Show Logs';
+  }
+}
+
+// Init DHCP section: Bootstrap collapse event (primary) + page load fallback
+document.getElementById('dhcpCollapse').addEventListener('show.bs.collapse', () => {
+  loadDhcpInterfaces();
+  loadDhcpStatus();
+});
+
+// Fallback: also load on page ready in case Bootstrap JS isn't available
+// or the section is already expanded. Safe to call even when section is hidden.
+document.addEventListener('DOMContentLoaded', () => {
+  loadDhcpInterfaces();
+  loadDhcpStatus();
+});
 </script>
 </body>
 </html>
@@ -1557,6 +1951,238 @@ def ztp_initialize():
         return jsonify({"status": e.code, "body": e.read().decode("utf-8", errors="replace")})
     except Exception as e:
         return jsonify({"error": str(e)})
+
+
+DHCP_CONF    = Path("/etc/dnsmasq.d/ztp-dhcp.conf")
+DHCP_PID     = Path("/var/run/ztp-dnsmasq.pid")
+DHCP_LEASES  = Path("/var/lib/dnsmasq/dnsmasq.leases")
+DHCP_STATE   = Path("/tmp/ztp-dhcp-state.json")
+
+
+def _dhcp_running():
+    if not DHCP_PID.exists():
+        return False
+    try:
+        pid = int(DHCP_PID.read_text().strip())
+        os.kill(pid, 0)
+        return True
+    except (ValueError, ProcessLookupError, PermissionError):
+        return False
+
+
+def _dhcp_read_state():
+    try:
+        return json.loads(DHCP_STATE.read_text())
+    except Exception:
+        return {}
+
+
+def _dhcp_write_state(cfg):
+    DHCP_STATE.write_text(json.dumps(cfg))
+
+
+def _dhcp_write_conf(cfg):
+    DHCP_LEASES.parent.mkdir(parents=True, exist_ok=True)
+    conf = (
+        f"interface={cfg['interface']}\n"
+        f"bind-interfaces\n"
+        f"dhcp-range={cfg['range_start']},{cfg['range_end']},60m\n"
+        f"dhcp-leasefile={DHCP_LEASES}\n"
+        f"port=0\n"
+        f"no-resolv\n"
+        f"no-hosts\n"
+    )
+    DHCP_CONF.parent.mkdir(parents=True, exist_ok=True)
+    DHCP_CONF.write_text(conf)
+
+
+def _ip_addr_add(ip_cidr, iface):
+    import subprocess
+    subprocess.run(["ip", "addr", "add", ip_cidr, "dev", iface],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _ip_addr_del(ip_cidr, iface):
+    import subprocess
+    subprocess.run(["ip", "addr", "del", ip_cidr, "dev", iface],
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _dhcp_stop_proc():
+    state = _dhcp_read_state()
+    if state.get("server_ip") and state.get("interface"):
+        _ip_addr_del(state["server_ip"], state["interface"])
+    if not DHCP_PID.exists():
+        return
+    try:
+        pid = int(DHCP_PID.read_text().strip())
+        os.kill(pid, 15)
+    except Exception:
+        pass
+    try:
+        DHCP_PID.unlink()
+    except Exception:
+        pass
+
+
+def _dhcp_start_proc():
+    import subprocess
+    proc = subprocess.Popen(
+        ["dnsmasq", "--conf-file=" + str(DHCP_CONF), "--no-daemon",
+         "--log-facility=/tmp/ztp-dnsmasq.log"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL
+    )
+    DHCP_PID.parent.mkdir(parents=True, exist_ok=True)
+    DHCP_PID.write_text(str(proc.pid))
+    return proc.pid
+
+
+@app.route("/dhcp-interfaces", methods=["GET"])
+def dhcp_interfaces():
+    import subprocess, re
+    _SKIP = {"lo"}
+    _SKIP_PREFIX = ("docker", "br-", "veth")
+
+    def _parse_brief(out):
+        ifaces = []
+        for line in out.splitlines():
+            parts = line.split()
+            if not parts:
+                continue
+            name = parts[0]
+            if name in _SKIP or any(name.startswith(p) for p in _SKIP_PREFIX):
+                continue
+            addrs = [a for a in parts[2:] if not a.startswith("fe80")]
+            ifaces.append({"name": name, "addresses": addrs})
+        return ifaces
+
+    def _parse_full(out):
+        # Parse `ip addr show` (non-brief) output
+        ifaces = []
+        current = None
+        for line in out.splitlines():
+            m = re.match(r'^\d+:\s+(\S+?)[@:]?\s', line)
+            if m:
+                name = m.group(1)
+                if name in _SKIP or any(name.startswith(p) for p in _SKIP_PREFIX):
+                    current = None
+                else:
+                    current = {"name": name, "addresses": []}
+                    ifaces.append(current)
+            elif current and "inet " in line:
+                m2 = re.search(r'inet (\S+)', line)
+                if m2 and not m2.group(1).startswith("fe80"):
+                    current["addresses"].append(m2.group(1))
+        return ifaces
+
+    try:
+        try:
+            out = subprocess.check_output(["ip", "-br", "addr", "show"],
+                                          text=True, stderr=subprocess.DEVNULL,
+                                          timeout=5)
+            ifaces = _parse_brief(out)
+        except Exception:
+            out = subprocess.check_output(["ip", "addr", "show"],
+                                          text=True, stderr=subprocess.DEVNULL,
+                                          timeout=5)
+            ifaces = _parse_full(out)
+        return jsonify({"interfaces": ifaces})
+    except Exception as e:
+        return jsonify({"interfaces": [], "error": str(e)})
+
+
+@app.route("/dhcp-status", methods=["GET"])
+def dhcp_status():
+    running = _dhcp_running()
+    state = _dhcp_read_state()
+    return jsonify({"running": running, "config": state if state else None})
+
+
+@app.route("/dhcp-start", methods=["POST"])
+def dhcp_start():
+    data = request.get_json(force=True)
+    iface       = data.get("interface", "").strip()
+    subnet      = data.get("subnet", "").strip()
+    range_start = data.get("range_start", "").strip()
+    range_end   = data.get("range_end", "").strip()
+    server_ip   = data.get("server_ip", "").strip()
+
+    if not all([iface, subnet, range_start, range_end, server_ip]):
+        return jsonify({"error": "interface, subnet, range_start, range_end, and server_ip are required"}), 400
+
+    cfg = {"interface": iface, "subnet": subnet,
+           "range_start": range_start, "range_end": range_end, "server_ip": server_ip}
+
+    if _dhcp_running():
+        _dhcp_stop_proc()
+
+    try:
+        _dhcp_write_conf(cfg)
+        _ip_addr_add(server_ip, iface)
+        _dhcp_start_proc()
+        _dhcp_write_state(cfg)
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/dhcp-stop", methods=["POST"])
+def dhcp_stop():
+    try:
+        _dhcp_stop_proc()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/dhcp-restart", methods=["POST"])
+def dhcp_restart():
+    try:
+        _dhcp_stop_proc()
+        if not DHCP_CONF.exists():
+            return jsonify({"error": "No DHCP config found. Start the server first."}), 400
+        _dhcp_start_proc()
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/dhcp-leases", methods=["GET"])
+def dhcp_leases():
+    leases = []
+    try:
+        if DHCP_LEASES.exists():
+            import datetime
+            for line in DHCP_LEASES.read_text().splitlines():
+                parts = line.strip().split()
+                if len(parts) >= 4:
+                    ts, mac, ip, hostname = parts[0], parts[1], parts[2], parts[3]
+                    try:
+                        expiry = datetime.datetime.fromtimestamp(
+                            int(ts)).strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        expiry = ts
+                    leases.append({
+                        "ip": ip, "mac": mac,
+                        "hostname": hostname if hostname != "*" else "",
+                        "expiry": expiry
+                    })
+    except Exception as e:
+        return jsonify({"leases": [], "error": str(e)})
+    return jsonify({"leases": leases})
+
+
+@app.route("/dhcp-logs", methods=["GET"])
+def dhcp_logs():
+    log_file = Path("/tmp/ztp-dnsmasq.log")
+    try:
+        if log_file.exists():
+            lines = log_file.read_text().splitlines()
+            return jsonify({"lines": lines[-100:]})
+        return jsonify({"lines": []})
+    except Exception as e:
+        return jsonify({"lines": [], "error": str(e)})
 
 
 if __name__ == "__main__":

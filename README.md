@@ -19,7 +19,7 @@ A web-based file server built with Flask to support **Zero Touch Provisioning (Z
 ```bash
 git clone git@github.com:wwt/Everpure-ZTP.git
 cd Everpure-ZTP
-docker compose up -d
+docker compose build --no-cache && docker compose up -d
 ```
 
 The server will be available at `http://<host-ip>:8080`.
@@ -31,6 +31,8 @@ To stop:
 ```bash
 docker compose down
 ```
+
+> **Note:** The DHCP Server feature does not work when running in a Docker container on macOS or Windows. Docker Desktop does not support true host networking on those platforms, which is required for the DHCP server to bind to a physical interface. See [DHCP Server](#dhcp-server) below for details.
 
 ## Installation (Bare Metal / VM)
 
@@ -97,6 +99,51 @@ Sends the initial configuration to a factory-fresh FlashArray.
 > **RC4 arrays** (using ETH4/5 as management ports): toggle **ETH4 / VIR4** in the Interface Mode selector. This switches the payload keys to `ct0.eth4`, `ct1.eth4`, and `vir4` as required.
 
 Once initialized, use the static IPs assigned during initialization to communicate with the array. The ZTP DHCP address and the `array-initial-config` endpoint are no longer valid after initialization completes.
+
+## DHCP Server
+
+The built-in DHCP server lets you assign IP addresses to FlashArray controllers over a private network without needing a separate DHCP service. It is intended for use during ZTP when no other DHCP server is available on the network.
+
+**How it works:**
+
+1. Select the network interface connected to the FlashArray management network.
+2. Set the subnet, DHCP range, and the static IP address the server itself should use on that interface.
+3. Click **Enable DHCP Server**. The application assigns the configured static IP to the selected interface and starts a `dnsmasq` DHCP process.
+4. When stopped, the static IP is removed from the interface and `dnsmasq` is shut down.
+
+Active leases and dnsmasq logs are viewable from the UI without leaving the page.
+
+> **Linux VM / bare-metal only.** The DHCP server requires direct access to the host network interface. It will not function when running inside a Docker container on macOS or Windows because Docker Desktop does not support host networking on those platforms. Use this feature only when the application is installed directly on a Linux VM or bare-metal server (via `setup.sh`).
+
+## FlashArray ZTP Simulator
+
+A lightweight mock container is included for testing the ZTP workflows without access to a physical FlashArray. It listens on port 8081 and simulates both ZTP API endpoints.
+
+```bash
+docker compose -f docker-compose.simulator.yml up -d
+```
+
+Once running, enter the host machine's IP address as the **Controller 1 ZTP IP** in the ZTP tool UI (e.g. `192.168.1.100`). The simulator will be reachable on port 8081.
+
+**What it simulates:**
+
+- **Check Status** — Returns `install-not-started` initially, then advances through all install phases automatically after a PATCH install is received
+- **ZTP FlashArray Install** — Accepts the PATCH request and begins phase progression: `Not Started` → `Install In Progress` → `Downloading` → `CT0 Installing` → `CT1 Installing` → `Complete`
+- **ZTP FlashArray Initialize** — Accepts the initialize PATCH payload and returns success immediately
+
+Each phase advances every 5 seconds by default. To change the speed, edit `PHASE_DELAY` in `docker-compose.simulator.yml`.
+
+To reset the simulator between test runs:
+
+```bash
+curl -X POST http://<host-ip>:8081/reset
+```
+
+To stop the simulator:
+
+```bash
+docker compose -f docker-compose.simulator.yml down
+```
 
 ## File Storage
 

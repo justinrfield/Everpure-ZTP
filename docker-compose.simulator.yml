@@ -1,0 +1,9 @@
+services:
+  flasharray-simulator:
+    build:
+      context: ./simulator
+    ports:
+      - "8081:8081"
+    environment:
+      PHASE_DELAY: "5"
+    restart: unless-stopped
