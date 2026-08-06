@@ -34,6 +34,69 @@ docker compose down
 
 > **Note:** The DHCP Server feature does not work when running in a Docker container on macOS or Windows. Docker Desktop does not support true host networking on those platforms, which is required for the DHCP server to bind to a physical interface. See [DHCP Server](#dhcp-server) below for details.
 
+## Running on Windows Server (Native Python)
+
+No Docker required. The ZTP FlashArray Install and Initialize features run natively on
+Windows with Python 3 and Flask. The DHCP Server is Linux-only and will not be available.
+
+### Prerequisites
+
+- **Python 3.x** — download from [python.org](https://www.python.org/downloads/)
+  - During installation, check **"Add Python to PATH"**
+  - After install, Python is typically invoked as `py` on Windows (the Python Launcher),
+    not `python`. Use `py` in all commands below if `python` is not recognized.
+- **Administrator PowerShell prompt**
+- **NSSM** *(optional)* — [nssm.cc/download](https://nssm.cc/download) — free tool to run
+  the server as a persistent Windows Service that survives reboots. Not required if you
+  prefer to start the server manually. If installed, place `nssm.exe` in
+  `C:\Windows\System32\` so `setup-windows.ps1` can find it automatically.
+
+### Setup
+
+```powershell
+powershell -ExecutionPolicy Bypass -File setup-windows.ps1
+```
+
+The script:
+1. Verifies Python 3 is installed
+2. Installs Flask via `pip`
+3. Creates the `files\` directory for uploaded packages
+4. Opens port 8080 in Windows Firewall
+5. If NSSM is on the PATH: registers and starts a persistent **Windows Service**
+6. If NSSM is not present: prints the manual run command (see below)
+
+The server will be available at `http://<server-ip>:8080`.
+
+### Manual run (no NSSM required)
+
+If you don't want to install NSSM, run the server directly from a PowerShell window.
+Leave the window open while the server is in use.
+
+> Replace `C:\path\to\Everpure-ZTP` with the actual folder where you extracted the project
+> (e.g. `C:\Users\Administrator\Downloads\Everpure-ZTP-main\Everpure-ZTP-main`).
+
+```powershell
+cd C:\path\to\Everpure-ZTP
+$env:FILE_SERVER_ROOT="C:\path\to\Everpure-ZTP\files"
+py app.py
+```
+
+> If `py` is not recognized, use the full Python path, e.g.:
+> `& "C:\Users\Administrator\AppData\Local\Programs\Python\Python314\python.exe" app.py`
+
+### Service management (NSSM)
+
+```powershell
+nssm stop fileserver
+nssm start fileserver
+nssm restart fileserver
+```
+
+> **Note:** ZTP FlashArray Install and Initialize work fully on Windows. The DHCP Server
+> feature requires direct Linux host networking and is not available on Windows.
+
+---
+
 ## Installation (Bare Metal / VM)
 
 ```bash
