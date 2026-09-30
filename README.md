@@ -155,9 +155,9 @@ Clicking **Check Status** automatically polls every 15 seconds until the status 
 
 Sends the initial configuration to a factory-fresh FlashArray.
 
-- **Endpoint used:** `PATCH http://<ct1.eth0 IP>:8081/array-initial-config`
+- **Endpoint used:** `PATCH http://<ct0.eth0 IP>:8081/array-initial-config`
 - **Required inputs:**
-  - `ct1.eth0 Management IP` — the DHCP-assigned management address after Purity FA is running (not the eth1/eth5 ZTP service address used during software install)
+  - `ct0.eth0 Management IP` — the DHCP-assigned management address of Controller 0 after Purity FA is running (not the eth1/eth5 ZTP service address used during software install)
   - FlashArray name
   - IP / Netmask / Gateway for `ct0.eth0`, `ct1.eth0`, and `vir0`
   - NTP servers and timezone

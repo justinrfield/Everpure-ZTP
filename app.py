@@ -349,7 +349,7 @@ HTML = """<!DOCTYPE html>
         <div class="col-md-4">
           <label class="form-label fw-semibold">Controller 1 (bottom controller) eth1/eth5 ZTP IP</label>
           <input type="text" id="ztpIp" class="form-control" placeholder="192.168.1.100">
-          <div class="form-text">Port 8081 is used automatically. From a console connection, look for it under <code>ps_eth1@br_eth1</code> (or <code>5</code>) when running <code>ip a</code>.</div>
+          <div class="form-text">Port 8081 is used automatically. To find the ZTP IP, log in to CT1 as <code>puresetup</code> and run: <code>ip -4 -n ztp_ns addr show ztp_eth0</code></div>
         </div>
         <div class="col-md-8">
           <label class="form-label fw-semibold">Package Path <small class="text-muted fw-normal">— .ppkg file URL</small></label>
@@ -448,7 +448,7 @@ HTML = """<!DOCTYPE html>
     <div class="card-body">
       <p class="text-muted small mb-3">
         <i class="bi bi-info-circle me-1"></i>
-        Sends initial configuration to a FlashArray via a PATCH request to <code>http://[ct1.eth0 IP]:8081/array-initial-config</code>. Use this after ZTP PureSoftwareInstall completes — Purity FA is now running and the ZTP service is no longer active.
+        Sends initial configuration to a FlashArray via a PATCH request to <code>http://[ct0.eth0 IP]:8081/array-initial-config</code>. Use this after ZTP PureSoftwareInstall completes — Purity FA is now running and the ZTP service is no longer active.
       </p>
       <div class="alert alert-info py-2 small mb-3">
         <i class="bi bi-exclamation-circle me-1"></i>
@@ -465,9 +465,15 @@ HTML = """<!DOCTYPE html>
 
         <!-- Target IP and Interface Mode -->
         <div class="col-md-4">
-          <label class="form-label fw-semibold">Controller 1 (bottom controller) eth0/eth4 Management IP</label>
-          <input type="text" id="initIp" class="form-control" placeholder="192.168.1.100">
+          <label class="form-label fw-semibold">Controller 0 (top controller) eth0/eth4 Management IP</label>
+          <div class="input-group">
+            <input type="text" id="initIp" class="form-control" placeholder="192.168.1.100">
+            <button class="btn btn-outline-secondary" type="button" id="initTestBtn" onclick="initTestConnection(this)">
+              <i class="bi bi-ethernet me-1"></i> Test
+            </button>
+          </div>
           <div class="form-text">DHCP-assigned management IP — not the eth1/eth5 ZTP service address. Port 8081 is used automatically. From a console connection, look for it under <code>ps_eth0@br_eth0</code> (or <code>4</code>) when running <code>ip a</code>.</div>
+          <div id="initTestResult" class="mt-1"></div>
         </div>
         <div class="col-md-4 d-flex align-items-end pb-1">
           <div>
@@ -1542,6 +1548,34 @@ function importInitPayload(input) {
   reader.readAsText(file);
 }
 
+async function initTestConnection(btn) {
+  const ip = document.getElementById('initIp').value.trim();
+  const result = document.getElementById('initTestResult');
+  if (!ip) { result.innerHTML = '<span class="text-danger small">Enter a management IP first.</span>'; return; }
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+  result.innerHTML = '';
+  try {
+    const resp = await fetch('/init-test-connection', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip })
+    });
+    const data = await resp.json();
+    if (data.error) {
+      result.innerHTML = '<span class="text-danger small"><i class="bi bi-x-circle me-1"></i>' + data.error + '</span>';
+    } else {
+      result.innerHTML = '<span class="text-success small"><i class="bi bi-check-circle me-1"></i>Reachable — HTTP ' + data.status_code + '</span>' +
+        '<pre class="bg-dark text-light rounded p-2 mt-1 small" style="max-height:120px;overflow:auto;white-space:pre-wrap;">' + data.body + '</pre>';
+    }
+  } catch (err) {
+    result.innerHTML = '<span class="text-danger small"><i class="bi bi-x-circle me-1"></i>' + err + '</span>';
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-ethernet me-1"></i> Test';
+  }
+}
+
 function _showInitError(msg) {
   const wrap = document.getElementById('initValidationMsg');
   if (!wrap) { alert(msg); return; }
@@ -2552,6 +2586,23 @@ def ztp_initialize():
             return jsonify({"status": resp.status, "body": resp.read().decode("utf-8", errors="replace")})
     except urllib.error.HTTPError as e:
         return jsonify({"status": e.code, "body": e.read().decode("utf-8", errors="replace")})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/init-test-connection", methods=["POST"])
+def init_test_connection():
+    data = request.get_json(force=True)
+    ip = data.get("ip", "").strip()
+    if not ip:
+        return jsonify({"error": "Management IP is required"}), 400
+    url = f"http://{ip}:8081/array-initial-config"
+    req = urllib.request.Request(url, method="GET")
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return jsonify({"status_code": resp.status, "body": resp.read().decode("utf-8", errors="replace")})
+    except urllib.error.HTTPError as e:
+        return jsonify({"status_code": e.code, "body": e.read().decode("utf-8", errors="replace")})
     except Exception as e:
         return jsonify({"error": str(e)})
 
