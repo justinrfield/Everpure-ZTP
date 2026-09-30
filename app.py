@@ -7,6 +7,7 @@ import shutil
 import urllib.request
 import urllib.parse
 import urllib.error
+import ssl
 from pathlib import Path
 from flask import (
     Flask, request, send_from_directory, redirect, url_for,
@@ -17,7 +18,18 @@ from werkzeug.utils import secure_filename
 app = Flask(__name__)
 app.secret_key = os.urandom(24)
 
+_zte_ssl = ssl.create_default_context()
+_zte_ssl.check_hostname = False
+_zte_ssl.verify_mode = ssl.CERT_NONE
+
 BASE_DIR = Path(os.environ.get("FILE_SERVER_ROOT", "/home/atcadmin/fileserver/files"))
+
+# Redirect Werkzeug upload temp files away from /tmp (which is a small tmpfs)
+# so large .ppkg uploads don't fill the system temp filesystem.
+import tempfile
+_upload_tmp = BASE_DIR / ".tmp"
+_upload_tmp.mkdir(parents=True, exist_ok=True)
+tempfile.tempdir = str(_upload_tmp)
 
 HTML = """<!DOCTYPE html>
 <html lang="en">
@@ -25,8 +37,8 @@ HTML = """<!DOCTYPE html>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Zero Touch Provisioning (ZTP) for FlashArray and FlashBlade</title>
-<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<link href="/logos/bootstrap.min.css" rel="stylesheet">
+<link href="/logos/bootstrap-icons.min.css" rel="stylesheet">
 <style>
   body { background: #f8f9fa; }
   .file-row:hover { background: #e9ecef; }
@@ -113,6 +125,25 @@ HTML = """<!DOCTYPE html>
               <button class="btn btn-warning" type="submit">Fetch</button>
             </div>
           </form>
+        </div>
+
+        <!-- Copy Link IP override -->
+        <div class="col-12">
+          <label class="form-label fw-semibold mb-1">
+            <i class="bi bi-link-45deg"></i> Copy Link IP Override
+            <span class="text-muted fw-normal ms-1" style="font-size:0.85rem">
+              — Set this to the IP of the interface connected to the FlashArray network if your
+              server has multiple NICs (e.g. a separate ZTP / DHCP interface). Leave blank to
+              use the IP you are currently connected to.
+            </span>
+          </label>
+          <div class="input-group" style="max-width:360px">
+            <span class="input-group-text"><i class="bi bi-hdd-network"></i></span>
+            <input type="text" id="copyLinkIpOverride" class="form-control"
+                   placeholder="e.g. 192.168.10.5"
+                   oninput="saveCopyLinkIp(this.value)">
+            <button class="btn btn-outline-secondary" type="button" onclick="clearCopyLinkIp()">Clear</button>
+          </div>
         </div>
 
       </div>
@@ -316,9 +347,9 @@ HTML = """<!DOCTYPE html>
       </p>
       <div class="row g-3">
         <div class="col-md-4">
-          <label class="form-label fw-semibold">Controller 1 (bottom controller) eth0/eth4 ZTP IP</label>
+          <label class="form-label fw-semibold">Controller 1 (bottom controller) eth1/eth5 ZTP IP</label>
           <input type="text" id="ztpIp" class="form-control" placeholder="192.168.1.100">
-          <div class="form-text">Port 8081 is used automatically. From a console connection, look for it under <code>ps_eth0@br_eth0</code> (or <code>4</code>) when running <code>ip a</code>.</div>
+          <div class="form-text">Port 8081 is used automatically. From a console connection, look for it under <code>ps_eth1@br_eth1</code> (or <code>5</code>) when running <code>ip a</code>.</div>
         </div>
         <div class="col-md-8">
           <label class="form-label fw-semibold">Package Path <small class="text-muted fw-normal">— .ppkg file URL</small></label>
@@ -364,7 +395,7 @@ HTML = """<!DOCTYPE html>
           <button class="btn btn-warning fw-semibold" onclick="runZtpInstall(this)">
             <i class="bi bi-lightning-charge-fill me-1"></i> Start PureInstall
           </button>
-          <button class="btn btn-outline-secondary fw-semibold" onclick="runZtpStatus(this)">
+          <button id="ztpStatusBtn" class="btn btn-outline-secondary fw-semibold" onclick="runZtpStatus(this)">
             <i class="bi bi-arrow-clockwise me-1"></i> Check Status
           </button>
         </div>
@@ -417,7 +448,7 @@ HTML = """<!DOCTYPE html>
     <div class="card-body">
       <p class="text-muted small mb-3">
         <i class="bi bi-info-circle me-1"></i>
-        Sends initial configuration to a FlashArray via a PATCH request to <code>http://[ct1.eth0 IP]:8081/array-initial-config</code>.
+        Sends initial configuration to a FlashArray via a PATCH request to <code>http://[ct1.eth0 IP]:8081/array-initial-config</code>. Use this after ZTP PureSoftwareInstall completes — Purity FA is now running and the ZTP service is no longer active.
       </p>
       <div class="alert alert-info py-2 small mb-3">
         <i class="bi bi-exclamation-circle me-1"></i>
@@ -434,9 +465,9 @@ HTML = """<!DOCTYPE html>
 
         <!-- Target IP and Interface Mode -->
         <div class="col-md-4">
-          <label class="form-label fw-semibold">Controller 1 (bottom controller) eth0/eth4 ZTP IP</label>
+          <label class="form-label fw-semibold">Controller 1 (bottom controller) eth0/eth4 Management IP</label>
           <input type="text" id="initIp" class="form-control" placeholder="192.168.1.100">
-          <div class="form-text">Port 8081 is used automatically. From a console connection, look for it under <code>ps_eth0@br_eth0</code> (or <code>4</code>) when running <code>ip a</code>.</div>
+          <div class="form-text">DHCP-assigned management IP — not the eth1/eth5 ZTP service address. Port 8081 is used automatically. From a console connection, look for it under <code>ps_eth0@br_eth0</code> (or <code>4</code>) when running <code>ip a</code>.</div>
         </div>
         <div class="col-md-4 d-flex align-items-end pb-1">
           <div>
@@ -1002,6 +1033,17 @@ HTML = """<!DOCTYPE html>
           </div>
         </div>
 
+        <!-- Skip connectivity tests -->
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="initSkipConnTests">
+            <label class="form-check-label" for="initSkipConnTests">
+              Skip Connectivity Tests
+              <small class="text-muted ms-1">— use for isolated environments with no internet connectivity</small>
+            </label>
+          </div>
+        </div>
+
         <div class="col-12 d-flex gap-2 flex-wrap">
           <button class="btn btn-info fw-semibold text-white" onclick="runZtpInitialize(this)">
             <i class="bi bi-hdd-rack me-1"></i> Send Initialize Config
@@ -1046,7 +1088,216 @@ HTML = """<!DOCTYPE html>
 </div>
 
 
+<!-- ZTE FlashArray Erasure -->
+<div class="card mb-3 border-danger">
+  <div class="card-header d-flex justify-content-between align-items-center"
+       style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#zteCollapse">
+    <span class="fw-semibold text-danger">
+      <i class="bi bi-fire me-1"></i> ZTE FlashArray Erasure
+    </span>
+    <i class="bi bi-chevron-down"></i>
+  </div>
+  <div class="collapse" id="zteCollapse">
+    <div class="card-body">
 
+      <div class="alert alert-danger d-flex align-items-start gap-2 mb-3">
+        <i class="bi bi-exclamation-triangle-fill fs-5 flex-shrink-0 mt-1"></i>
+        <div>
+          <strong>Destructive operation &#8212; ZTE permanently erases all data and configuration.</strong>
+          Complete every item in the pre-erasure checklist below before starting. This cannot be undone.
+        </div>
+      </div>
+
+      <!-- Pre-erasure checklist -->
+      <div class="card border-warning mb-3">
+        <div class="card-header bg-warning bg-opacity-10 d-flex justify-content-between align-items-center"
+             style="cursor:pointer" data-bs-toggle="collapse" data-bs-target="#zteChecklist">
+          <span class="fw-semibold text-warning-emphasis">
+            <i class="bi bi-clipboard2-check me-1"></i> Pre-Erasure Checklist &#8212; complete all items before starting ZTE
+          </span>
+          <i class="bi bi-chevron-down"></i>
+        </div>
+        <div class="collapse show" id="zteChecklist">
+          <div class="card-body pt-2 pb-2">
+            <p class="text-muted mb-2" style="font-size:0.875rem">
+              The ZTE start request will fail immediately if any of these conditions are not met.
+              Use the Purity UI or REST API to complete each step, then eradicate before proceeding.
+            </p>
+            <div class="row g-0">
+              <div class="col-md-6">
+                <ul class="list-unstyled mb-0" style="font-size:0.9rem">
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Disable SafeMode</strong> &#8212; SafeMode must be turned off before ZTE can proceed</li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Disconnect all hosts</strong> &#8212; remove host connections and host entries</li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Delete &amp; eradicate all volumes</strong> &#8212; including all volume snapshots (exclude system volumes)</li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Delete &amp; eradicate all protection groups (pgroups)</strong> &#8212; including pgroup snapshots</li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Delete &amp; eradicate all pods</strong></li>
+                </ul>
+              </div>
+              <div class="col-md-6">
+                <ul class="list-unstyled mb-0" style="font-size:0.9rem">
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Remove all array connections</strong> &#8212; disconnect replication and pod stretch targets</li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Remove offload targets</strong> &#8212; NFS, S3, and Azure offload configurations</li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Delete file systems, shares, and directory services</strong></li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Remove Active Directory configuration</strong></li>
+                  <li class="mb-1"><i class="bi bi-square text-secondary me-2"></i><strong>Confirm authorization and business approval</strong> &#8212; data-retention, legal-hold, and change-management requirements satisfied</li>
+                </ul>
+              </div>
+            </div>
+            <div class="alert alert-warning py-2 px-3 mt-2 mb-0" style="font-size:0.875rem">
+              <i class="bi bi-exclamation-circle me-1"></i>
+              <strong>Eradication is required</strong> &#8212; deleted items enter a pending-eradication state.
+              You must explicitly eradicate volumes, snapshots, pgroups, and pods (not just delete them)
+              before ZTE will proceed.
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row g-3">
+
+        <!-- Connection -->
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">Array Management VIP / Hostname</label>
+          <input type="text" id="zteVip" class="form-control" placeholder="192.168.1.100 or array.example.com">
+        </div>
+        <div class="col-md-2">
+          <label class="form-label fw-semibold">API Version</label>
+          <input type="text" id="zteApiVersion" class="form-control" value="2.56">
+        </div>
+        <div class="col-md-4">
+          <label class="form-label fw-semibold">API Token</label>
+          <input type="password" id="zteApiToken" class="form-control"
+                 placeholder="API token for authentication" autocomplete="off">
+        </div>
+        <div class="col-md-2 d-flex align-items-end">
+          <button class="btn btn-outline-secondary fw-semibold w-100" onclick="zteAuthenticate(this)">
+            <i class="bi bi-key me-1"></i> Authenticate
+          </button>
+        </div>
+
+        <div class="col-12 d-none" id="zteSessionRow">
+          <label class="form-label fw-semibold">
+            Session Token
+            <small class="text-muted fw-normal">(x-auth-token &#8212; re-authenticate if requests return 401)</small>
+          </label>
+          <div class="input-group">
+            <input type="text" id="zteSessionToken" class="form-control font-monospace" readonly>
+            <button class="btn btn-outline-secondary" type="button"
+                    onclick="navigator.clipboard.writeText(document.getElementById('zteSessionToken').value)">
+              <i class="bi bi-clipboard"></i>
+            </button>
+          </div>
+        </div>
+
+        <!-- Phase 1 -->
+        <div class="col-12"><hr class="my-1">
+          <span class="fw-semibold">Phase 1 &mdash; Start Secure Wipe</span>
+        </div>
+
+        <div class="col-12">
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="zteSkipPhonehome">
+            <label class="form-check-label" for="zteSkipPhonehome">
+              Dark-site array &#8212; skip phone-home check
+              <small class="text-muted ms-1">
+                Only use for arrays that intentionally cannot reach Pure Storage.
+                Do not use to bypass unexpected connectivity issues.
+              </small>
+            </label>
+          </div>
+        </div>
+
+        <div class="col-12 d-flex gap-2 flex-wrap">
+          <button class="btn btn-danger fw-semibold" onclick="zteStartWipe(this)">
+            <i class="bi bi-fire me-1"></i> Start ZTE Wipe
+          </button>
+          <button id="zteStatusBtn" class="btn btn-outline-secondary fw-semibold" onclick="zteCheckStatus(this)">
+            <i class="bi bi-arrow-clockwise me-1"></i> Check Wipe Status
+          </button>
+          <button class="btn btn-outline-danger fw-semibold" onclick="zteCancelErasure(this)">
+            <i class="bi bi-x-circle me-1"></i> Cancel ZTE
+          </button>
+        </div>
+
+        <div id="zteStatusPanel" class="col-12 d-none">
+          <div class="border rounded p-3 bg-light">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="fw-semibold">Erasure Status</span>
+              <span id="ztePhaseBadge" class="badge fs-6"></span>
+            </div>
+            <p id="ztePhaseDesc" class="text-muted mb-2" style="font-size:0.9rem"></p>
+            <div id="zteRawResponse">
+              <div class="d-flex align-items-center gap-2 mb-1">
+                <small class="fw-semibold">Raw Response</small>
+                <button id="zteCopyCertBtn" class="btn btn-sm btn-outline-secondary d-none"
+                        onclick="zteCopyCert(this)">
+                  <i class="bi bi-clipboard me-1"></i> Copy Certificate
+                </button>
+                <button id="zteDownloadCertBtn" class="btn btn-sm btn-outline-primary d-none"
+                        onclick="zteDownloadCert()">
+                  <i class="bi bi-download me-1"></i> Download Certificate
+                </button>
+              </div>
+              <pre id="zteResponsePre" class="bg-dark text-light rounded p-2 mb-0"
+                   style="max-height:250px;overflow:auto;font-size:0.8rem;white-space:pre-wrap"></pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Phase 2 -->
+        <div class="col-12"><hr class="my-1">
+          <span class="fw-semibold">Phase 2 &mdash; Finalize &amp; Reinstall Image</span>
+          <p class="text-muted mt-1 mb-0" style="font-size:0.875rem">
+            Only proceed after Phase 1 status shows <code>waiting_for_finalize</code>
+            and the sanitization certificate has been saved.
+          </p>
+        </div>
+
+        <div class="col-12">
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="zteImageMode"
+                   id="zteImageAuto" value="auto" checked onchange="zteToggleImageSource()">
+            <label class="form-check-label" for="zteImageAuto">
+              Phoning-home (<code>image_source: auto</code>)
+            </label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="zteImageMode"
+                   id="zteImageCustom" value="custom" onchange="zteToggleImageSource()">
+            <label class="form-check-label" for="zteImageCustom">Dark-site (custom image source)</label>
+          </div>
+          <div id="zteImageSourceRow" class="mt-2 d-none">
+            <input type="text" id="zteImageSource" class="form-control"
+                   placeholder="http://fileserver:8080/download/purity.sh  or  file:///path/to/purity_iso.sh">
+            <small class="text-muted">URL or local file URI (<code>file:///</code>) reachable by the array</small>
+          </div>
+        </div>
+
+        <div class="col-12 d-flex gap-2 flex-wrap">
+          <button class="btn btn-danger fw-semibold" onclick="zteFinalize(this)">
+            <i class="bi bi-check2-circle me-1"></i> Finalize &amp; Reinstall Image
+          </button>
+        </div>
+
+        <div id="zteActionResponse" class="col-12 d-none">
+          <div class="border rounded p-3">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="fw-semibold" id="zteActionLabel">Response</span>
+              <span id="zteActionBadge" class="badge fs-6"></span>
+            </div>
+            <pre id="zteActionBody" class="bg-dark text-light rounded p-2 mb-0"
+                 style="max-height:200px;overflow:auto;font-size:0.8rem;white-space:pre-wrap"></pre>
+          </div>
+        </div>
+
+        <div id="zteError" class="col-12 d-none">
+          <div class="alert alert-danger py-2 mb-0"></div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
 
 
 </div><!-- /container -->
@@ -1079,7 +1330,7 @@ HTML = """<!DOCTYPE html>
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+<script src="/logos/bootstrap.bundle.min.js"></script>
 <script>
 function openMoveModal(relPath, name) {
   document.getElementById('moveFileName').textContent = name;
@@ -1096,9 +1347,56 @@ const ZTP_PHASES = [
   { key: 'install-complete',         label: 'Complete',            desc: 'Both controllers have rebooted. Purity should be up and running.' },
 ];
 
+let _ztpPoller = null;
+
+function _stopZtpPoller() {
+  if (_ztpPoller !== null) { clearInterval(_ztpPoller); _ztpPoller = null; }
+  const btn = document.getElementById('ztpStatusBtn');
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Check Status';
+    btn.className = 'btn btn-outline-secondary fw-semibold';
+  }
+}
+
+function _applyZtpStatusData(data) {
+  document.getElementById('ztpStatusPanel').classList.remove('d-none');
+  const status = data.status || '';
+  const phaseIdx = ZTP_PHASES.findIndex(p => p.key === status);
+  const phase = ZTP_PHASES[phaseIdx] || { label: status || 'Unknown', desc: data.error || '' };
+  const isComplete = status === 'install-complete';
+  const isError = !data.status;
+
+  const badge = document.getElementById('ztpPhaseBadge');
+  badge.textContent = phase.label;
+  badge.className = 'badge fs-6 ' + (isError ? 'bg-danger' : isComplete ? 'bg-success' : status === 'install-not-started' ? 'bg-secondary' : 'bg-primary');
+  document.getElementById('ztpPhaseDesc').textContent = phase.desc;
+
+  document.getElementById('ztpSteps').innerHTML = ZTP_PHASES.map((p, i) => {
+    const done = phaseIdx >= 0 && i < phaseIdx;
+    const active = i === phaseIdx;
+    const cls = done ? 'bg-success text-white' : active ? 'bg-primary text-white' : 'bg-light text-muted border';
+    return `<span class="badge rounded-pill px-3 py-2 ${cls}" style="font-size:0.8rem">${done ? '\\u2713 ' : ''}${p.label}</span>`;
+  }).join('');
+
+  const errBlock = document.getElementById('ztpErrorsBlock');
+  const errors = data.errors;
+  if (errors && errors.length) {
+    errBlock.classList.remove('d-none');
+    document.getElementById('ztpErrorsBody').textContent = JSON.stringify(errors, null, 2);
+  } else {
+    errBlock.classList.add('d-none');
+  }
+  document.getElementById('ztpCompleteNote').classList.toggle('d-none', !isComplete);
+  return { isComplete, isError };
+}
+
 async function runZtpStatus(btn) {
   const ip = document.getElementById('ztpIp').value.trim();
   if (!ip) { alert('Enter the Controller 1 ZTP IP first.'); return; }
+
+  // Second click while polling → stop
+  if (_ztpPoller !== null) { _stopZtpPoller(); return; }
 
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking…';
@@ -1110,45 +1408,31 @@ async function runZtpStatus(btn) {
       body: JSON.stringify({ ip })
     });
     const data = await resp.json();
+    const { isComplete, isError } = _applyZtpStatusData(data);
 
-    const panel = document.getElementById('ztpStatusPanel');
-    panel.classList.remove('d-none');
-
-    const status = data.status || '';
-    const phaseIdx = ZTP_PHASES.findIndex(p => p.key === status);
-    const phase = ZTP_PHASES[phaseIdx] || { label: status || 'Unknown', desc: data.error || '' };
-
-    const badge = document.getElementById('ztpPhaseBadge');
-    badge.textContent = phase.label;
-    const isComplete = status === 'install-complete';
-    const isError = !data.status;
-    badge.className = 'badge fs-6 ' + (isError ? 'bg-danger' : isComplete ? 'bg-success' : status === 'install-not-started' ? 'bg-secondary' : 'bg-primary');
-
-    document.getElementById('ztpPhaseDesc').textContent = phase.desc;
-
-    // Step bubbles
-    const stepsEl = document.getElementById('ztpSteps');
-    stepsEl.innerHTML = ZTP_PHASES.map((p, i) => {
-      const done = phaseIdx >= 0 && i < phaseIdx;
-      const active = i === phaseIdx;
-      const cls = done ? 'bg-success text-white' : active ? 'bg-primary text-white' : 'bg-light text-muted border';
-      return `<span class="badge rounded-pill px-3 py-2 ${cls}" style="font-size:0.8rem">${done ? '✓ ' : ''}${p.label}</span>`;
-    }).join('');
-
-    // Errors
-    const errBlock = document.getElementById('ztpErrorsBlock');
-    const errors = data.errors;
-    if (errors && errors.length) {
-      errBlock.classList.remove('d-none');
-      document.getElementById('ztpErrorsBody').textContent = JSON.stringify(errors, null, 2);
-    } else {
-      errBlock.classList.add('d-none');
+    if (!isComplete && !isError) {
+      // Start 15-second auto-refresh
+      _ztpPoller = setInterval(async () => {
+        try {
+          const r = await fetch('/ztp-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip })
+          });
+          const { isComplete: done, isError: err } = _applyZtpStatusData(await r.json());
+          if (done || err) _stopZtpPoller();
+        } catch(e) { _stopZtpPoller(); }
+      }, 15000);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-stop-circle me-1"></i> Stop Auto-Refresh';
+      btn.className = 'btn btn-outline-danger fw-semibold';
     }
-
-    document.getElementById('ztpCompleteNote').classList.toggle('d-none', !isComplete);
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Check Status';
+    if (_ztpPoller === null) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Check Status';
+      btn.className = 'btn btn-outline-secondary fw-semibold';
+    }
   }
 }
 
@@ -1342,6 +1626,7 @@ function buildPayloadOnly() {
   };
 
   if (emails) payload.alert_emails = emails.split(',').map(s => s.trim()).filter(Boolean);
+  if (document.getElementById('initSkipConnTests').checked) payload.skip_connectivity_tests = true;
   return payload;
 }
 
@@ -1436,8 +1721,34 @@ async function runZtpInitialize(btn) {
   }
 }
 
+function saveCopyLinkIp(val) {
+  if (val.trim()) localStorage.setItem('copyLinkIpOverride', val.trim());
+  else localStorage.removeItem('copyLinkIpOverride');
+}
+
+function clearCopyLinkIp() {
+  localStorage.removeItem('copyLinkIpOverride');
+  const el = document.getElementById('copyLinkIpOverride');
+  if (el) el.value = '';
+}
+
+function _copyLinkBase() {
+  const override = (localStorage.getItem('copyLinkIpOverride') || '').trim();
+  if (override) {
+    const port = window.location.port ? ':' + window.location.port : '';
+    return window.location.protocol + '//' + override + port;
+  }
+  return window.location.origin;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const saved = localStorage.getItem('copyLinkIpOverride');
+  const el = document.getElementById('copyLinkIpOverride');
+  if (saved && el) el.value = saved;
+});
+
 function copyLink(btn, relPath) {
-  const url = window.location.origin + '/download/' + relPath;
+  const url = _copyLinkBase() + '/download/' + relPath;
   const confirm = () => {
     const orig = btn.innerHTML;
     btn.innerHTML = '<i class="bi bi-check2"></i> Copied!';
@@ -1677,6 +1988,298 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDhcpInterfaces();
   loadDhcpStatus();
 });
+// ── ZTE FlashArray Erasure ────────────────────────────────────────────────────
+let _ztePoller = null;
+let _zteLastResponse = null;
+
+const ZTE_STATUSES = {
+  'resetting':            { label: 'Wiping',            cls: 'bg-warning text-dark', desc: 'Drive wipe in progress (~30 min). REST API may be temporarily unavailable.' },
+  'waiting_for_finalize': { label: 'Ready to Finalize', cls: 'bg-info text-white',   desc: 'Phase 1 complete. Save the sanitization certificate, then run Finalize & Reinstall.' },
+  'reset_failed':         { label: 'Wipe Failed',       cls: 'bg-danger',            desc: 'Check failure details and correct pre-erasure conditions before retrying.' },
+  'download_failed':      { label: 'Download Failed',   cls: 'bg-danger',            desc: 'Image download failed. Check network and image source reachability.' },
+  'reimage_failed':       { label: 'Reimage Failed',    cls: 'bg-danger',            desc: 'Image reinstall failed. Check image source and retry finalization.' },
+};
+
+function _zteInputs() {
+  return {
+    vip:           (document.getElementById('zteVip').value || '').trim(),
+    api_version:   (document.getElementById('zteApiVersion').value || '2.56').trim(),
+    session_token: (document.getElementById('zteSessionToken').value || '').trim(),
+  };
+}
+
+function _showZteError(msg) {
+  const el = document.getElementById('zteError');
+  if (!el) return;
+  el.classList.remove('d-none');
+  el.querySelector('.alert').textContent = msg;
+}
+
+function _clearZteError() {
+  const el = document.getElementById('zteError');
+  if (el) el.classList.add('d-none');
+}
+
+function _stopZtePoller() {
+  if (_ztePoller !== null) { clearInterval(_ztePoller); _ztePoller = null; }
+  const btn = document.getElementById('zteStatusBtn');
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Check Wipe Status';
+    btn.className = 'btn btn-outline-secondary fw-semibold';
+  }
+}
+
+function _applyZteStatusData(data) {
+  _clearZteError();
+  const items = data.items || (Array.isArray(data) ? data : [data]);
+  const item  = items[0] || {};
+  const status = item.status || data.status || '';
+  const info   = ZTE_STATUSES[status] || { label: status || 'Unknown', cls: 'bg-secondary', desc: '' };
+  const isDone = ['waiting_for_finalize','reset_failed','download_failed','reimage_failed'].includes(status);
+
+  document.getElementById('zteStatusPanel').classList.remove('d-none');
+  const badge = document.getElementById('ztePhaseBadge');
+  badge.textContent = info.label;
+  badge.className = 'badge fs-6 ' + info.cls;
+  document.getElementById('ztePhaseDesc').textContent = info.desc;
+
+  _zteLastResponse = data;
+  document.getElementById('zteResponsePre').textContent = JSON.stringify(data, null, 2);
+
+  const certPresent = !!(item.sanitization_certificate);
+  document.getElementById('zteCopyCertBtn').classList.toggle('d-none', !certPresent);
+  document.getElementById('zteDownloadCertBtn').classList.toggle('d-none', !certPresent);
+
+  return { status, isDone };
+}
+
+function _showZteActionResponse(label, data) {
+  const panel = document.getElementById('zteActionResponse');
+  panel.classList.remove('d-none');
+  document.getElementById('zteActionLabel').textContent = label + ' Response';
+  const badge = document.getElementById('zteActionBadge');
+  const s = data.status;
+  if (s) {
+    badge.textContent = 'HTTP ' + s;
+    badge.className = 'badge fs-6 ' + (s < 300 ? 'bg-success' : s < 500 ? 'bg-warning text-dark' : 'bg-danger');
+  } else if (data.error) {
+    badge.textContent = 'Error';
+    badge.className = 'badge fs-6 bg-danger';
+  } else {
+    badge.textContent = '';
+    badge.className = 'badge fs-6';
+  }
+  let body = data.body || data.error || JSON.stringify(data, null, 2);
+  try { body = JSON.stringify(JSON.parse(body), null, 2); } catch(e) {}
+  document.getElementById('zteActionBody').textContent = body;
+}
+
+async function zteAuthenticate(btn) {
+  _clearZteError();
+  const vip   = (document.getElementById('zteVip').value || '').trim();
+  const token = (document.getElementById('zteApiToken').value || '').trim();
+  if (!vip || !token) { _showZteError('Array VIP and API token are required.'); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Authenticating…';
+
+  try {
+    const resp = await fetch('/zte-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vip, api_token: token })
+    });
+    const data = await resp.json();
+    if (data.error) { _showZteError('Authentication failed: ' + data.error); btn.disabled = false; btn.innerHTML = '<i class="bi bi-key me-1"></i> Authenticate'; return; }
+    document.getElementById('zteSessionToken').value = data.session_token;
+    document.getElementById('zteSessionRow').classList.remove('d-none');
+    btn.innerHTML = '<i class="bi bi-check2 me-1"></i> Authenticated';
+    btn.className = 'btn btn-success fw-semibold w-100';
+    setTimeout(() => {
+      btn.innerHTML = '<i class="bi bi-key me-1"></i> Re-Authenticate';
+      btn.className = 'btn btn-outline-secondary fw-semibold w-100';
+      btn.disabled = false;
+    }, 2000);
+  } catch(e) {
+    _showZteError('Request failed: ' + e.message);
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-key me-1"></i> Authenticate';
+  }
+}
+
+async function zteStartWipe(btn) {
+  _clearZteError();
+  const { vip, api_version, session_token } = _zteInputs();
+  if (!vip)          { _showZteError('Array VIP is required.'); return; }
+  if (!session_token){ _showZteError('Authenticate first to get a session token.'); return; }
+
+  const skip = document.getElementById('zteSkipPhonehome').checked;
+  const mode = skip ? 'dark-site (skip_phonehome_check=true)' : 'phoning-home (skip_phonehome_check=false)';
+  if (!confirm(
+    'WARNING: This will permanently erase all data on ' + vip + '.\\n\\n' +
+    'Mode: ' + mode + '\\n\\n' +
+    'Confirm the pre-erasure checklist is complete and approvals are in place.\\n\\nClick OK to start.'
+  )) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Starting…';
+  try {
+    const resp = await fetch('/zte-start-wipe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vip, api_version, session_token, skip_phonehome_check: skip })
+    });
+    const data = await resp.json();
+    _showZteActionResponse('Start Wipe', data);
+    if (data.error) _showZteError(data.error);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-fire me-1"></i> Start ZTE Wipe';
+  }
+}
+
+async function zteCheckStatus(btn) {
+  _clearZteError();
+  const { vip, api_version, session_token } = _zteInputs();
+  if (!vip)          { _showZteError('Array VIP is required.'); return; }
+  if (!session_token){ _showZteError('Authenticate first to get a session token.'); return; }
+
+  if (_ztePoller !== null) { _stopZtePoller(); return; }
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Checking…';
+
+  try {
+    const resp = await fetch('/zte-erasure-status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vip, api_version, session_token })
+    });
+    const data = await resp.json();
+    if (!data.ok) { _showZteError(data.error || 'Status check failed'); return; }
+    const { isDone } = _applyZteStatusData(data.data);
+
+    if (!isDone) {
+      _ztePoller = setInterval(async () => {
+        try {
+          const r = await fetch('/zte-erasure-status', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ vip, api_version, session_token })
+          });
+          const d = await r.json();
+          if (!d.ok) { _stopZtePoller(); return; }
+          const { isDone: done } = _applyZteStatusData(d.data);
+          if (done) _stopZtePoller();
+        } catch(e) { _stopZtePoller(); }
+      }, 30000);
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-stop-circle me-1"></i> Stop Auto-Refresh';
+      btn.className = 'btn btn-outline-danger fw-semibold';
+    }
+  } catch(e) {
+    _showZteError('Request failed: ' + e.message);
+  } finally {
+    if (_ztePoller === null) {
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-arrow-clockwise me-1"></i> Check Wipe Status';
+      btn.className = 'btn btn-outline-secondary fw-semibold';
+    }
+  }
+}
+
+async function zteFinalize(btn) {
+  _clearZteError();
+  const { vip, api_version, session_token } = _zteInputs();
+  if (!vip)          { _showZteError('Array VIP is required.'); return; }
+  if (!session_token){ _showZteError('Authenticate first to get a session token.'); return; }
+
+  const isCustom   = document.getElementById('zteImageCustom').checked;
+  const imageSource = isCustom ? (document.getElementById('zteImageSource').value || '').trim() : 'auto';
+  if (isCustom && !imageSource) { _showZteError('Image source URL or path is required for dark-site finalization.'); return; }
+
+  if (!confirm(
+    'WARNING: Finalizing will delete the sanitization certificate from the array and begin image reinstallation (~40 min).\\n\\n' +
+    'Confirm the certificate has been saved before continuing.\\n\\nClick OK to finalize.'
+  )) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Finalizing…';
+  try {
+    const resp = await fetch('/zte-finalize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vip, api_version, session_token, image_source: imageSource })
+    });
+    const data = await resp.json();
+    _showZteActionResponse('Finalize', data);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Finalize &amp; Reinstall Image';
+  }
+}
+
+async function zteCancelErasure(btn) {
+  _clearZteError();
+  const { vip, api_version, session_token } = _zteInputs();
+  if (!vip || !session_token) { _showZteError('Array VIP and session token are required.'); return; }
+  if (!confirm('Cancel the current ZTE operation on ' + vip + '?\\n\\nThis sends DELETE /arrays/erasures.')) return;
+
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Cancelling…';
+  try {
+    const resp = await fetch('/zte-cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ vip, api_version, session_token })
+    });
+    const data = await resp.json();
+    _showZteActionResponse('Cancel ZTE', data);
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="bi bi-x-circle me-1"></i> Cancel ZTE';
+  }
+}
+
+function zteToggleImageSource() {
+  const custom = document.getElementById('zteImageCustom').checked;
+  document.getElementById('zteImageSourceRow').classList.toggle('d-none', !custom);
+}
+
+function zteCopyCert(btn) {
+  const pre = document.getElementById('zteResponsePre').textContent;
+  let cert = pre;
+  try {
+    const parsed = JSON.parse(pre);
+    const items = parsed.items || (Array.isArray(parsed) ? parsed : [parsed]);
+    const c = (items[0] || {}).sanitization_certificate;
+    if (c) cert = c;
+  } catch(e) {}
+  navigator.clipboard.writeText(cert).then(() => {
+    const orig = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check2 me-1"></i> Copied!';
+    setTimeout(() => { btn.innerHTML = orig; }, 2000);
+  });
+}
+
+function zteDownloadCert() {
+  const pre = document.getElementById('zteResponsePre').textContent;
+  let cert = pre;
+  let filename = 'sanitization-certificate.txt';
+  try {
+    const parsed = JSON.parse(pre);
+    const items = parsed.items || (Array.isArray(parsed) ? parsed : [parsed]);
+    const item = items[0] || {};
+    if (item.sanitization_certificate) cert = item.sanitization_certificate;
+    if (item.id) filename = item.id + '-sanitization-certificate.txt';
+  } catch(e) {}
+  const a = document.createElement('a');
+  a.href = 'data:text/plain;charset=utf-8,' + encodeURIComponent(cert);
+  a.download = filename;
+  a.click();
+}
+
 </script>
 </body>
 </html>
@@ -1953,6 +2556,138 @@ def ztp_initialize():
         return jsonify({"error": str(e)})
 
 
+# ── ZTE FlashArray Erasure ────────────────────────────────────────────────────
+
+@app.route("/zte-login", methods=["POST"])
+def zte_login():
+    data = request.get_json(force=True)
+    vip = data.get("vip", "").strip()
+    api_token = data.get("api_token", "").strip()
+    if not vip or not api_token:
+        return jsonify({"error": "VIP and API token required"}), 400
+
+    url = f"https://{vip}/api/login"
+    req = urllib.request.Request(url, data=b"", method="POST")
+    req.add_header("api-token", api_token)
+    req.add_header("Content-Length", "0")
+
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=_zte_ssl) as resp:
+            session_token = resp.getheader("x-auth-token")
+            if not session_token:
+                return jsonify({"error": "No x-auth-token in response"}), 500
+            return jsonify({"session_token": session_token})
+    except urllib.error.HTTPError as e:
+        return jsonify({"error": f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')}"}), e.code
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/zte-erasure-status", methods=["POST"])
+def zte_erasure_status():
+    data = request.get_json(force=True)
+    vip = data.get("vip", "").strip()
+    version = data.get("api_version", "2.56").strip()
+    session_token = data.get("session_token", "").strip()
+    if not vip or not session_token:
+        return jsonify({"ok": False, "error": "VIP and session token required"}), 400
+
+    url = f"https://{vip}/api/{version}/arrays/erasures"
+    req = urllib.request.Request(url, method="GET")
+    req.add_header("x-auth-token", session_token)
+
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=_zte_ssl) as resp:
+            body = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return jsonify({"ok": True, "data": body})
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        return jsonify({"ok": False, "error": f"HTTP {e.code}", "body": body})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)})
+
+
+@app.route("/zte-start-wipe", methods=["POST"])
+def zte_start_wipe():
+    data = request.get_json(force=True)
+    vip = data.get("vip", "").strip()
+    version = data.get("api_version", "2.56").strip()
+    session_token = data.get("session_token", "").strip()
+    skip_phonehome = bool(data.get("skip_phonehome_check", False))
+    if not vip or not session_token:
+        return jsonify({"error": "VIP and session token required"}), 400
+
+    skip_val = "true" if skip_phonehome else "false"
+    url = (f"https://{vip}/api/{version}/arrays/erasures"
+           f"?eradicate_all_data=true&preserve_configuration_data=all"
+           f"&skip_phonehome_check={skip_val}")
+    req = urllib.request.Request(url, data=b"", method="POST")
+    req.add_header("x-auth-token", session_token)
+    req.add_header("Content-Length", "0")
+
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=_zte_ssl) as resp:
+            return jsonify({"status": resp.status, "body": resp.read().decode("utf-8", errors="replace")})
+    except urllib.error.HTTPError as e:
+        return jsonify({"status": e.code, "body": e.read().decode("utf-8", errors="replace")})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/zte-finalize", methods=["POST"])
+def zte_finalize():
+    data = request.get_json(force=True)
+    vip = data.get("vip", "").strip()
+    version = data.get("api_version", "2.56").strip()
+    session_token = data.get("session_token", "").strip()
+    image_source = data.get("image_source", "auto").strip() or "auto"
+    if not vip or not session_token:
+        return jsonify({"error": "VIP and session token required"}), 400
+
+    payload = {
+        "finalize": True,
+        "eradicate_all_data": True,
+        "reinstall_image": True,
+        "delete_sanitization_certificate": True,
+        "image_source": image_source,
+    }
+    body_bytes = json.dumps(payload).encode()
+    url = f"https://{vip}/api/{version}/arrays/erasures"
+    req = urllib.request.Request(url, data=body_bytes, method="PATCH")
+    req.add_header("x-auth-token", session_token)
+    req.add_header("Content-Type", "application/json")
+
+    try:
+        with urllib.request.urlopen(req, timeout=30, context=_zte_ssl) as resp:
+            return jsonify({"status": resp.status, "body": resp.read().decode("utf-8", errors="replace")})
+    except urllib.error.HTTPError as e:
+        return jsonify({"status": e.code, "body": e.read().decode("utf-8", errors="replace")})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
+@app.route("/zte-cancel", methods=["POST"])
+def zte_cancel():
+    data = request.get_json(force=True)
+    vip = data.get("vip", "").strip()
+    version = data.get("api_version", "2.56").strip()
+    session_token = data.get("session_token", "").strip()
+    if not vip or not session_token:
+        return jsonify({"error": "VIP and session token required"}), 400
+
+    url = f"https://{vip}/api/{version}/arrays/erasures"
+    req = urllib.request.Request(url, method="DELETE")
+    req.add_header("x-auth-token", session_token)
+
+    try:
+        with urllib.request.urlopen(req, timeout=15, context=_zte_ssl) as resp:
+            return jsonify({"status": resp.status, "body": resp.read().decode("utf-8", errors="replace")})
+    except urllib.error.HTTPError as e:
+        return jsonify({"status": e.code, "body": e.read().decode("utf-8", errors="replace")})
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+
 DHCP_CONF    = Path("/etc/dnsmasq.d/ztp-dhcp.conf")
 DHCP_PID     = Path("/var/run/ztp-dnsmasq.pid")
 DHCP_LEASES  = Path("/var/lib/dnsmasq/dnsmasq.leases")
@@ -1991,6 +2726,8 @@ def _dhcp_write_conf(cfg):
         f"port=0\n"
         f"no-resolv\n"
         f"no-hosts\n"
+        f"dhcp-option=3\n"
+        f"dhcp-option=6\n"
     )
     DHCP_CONF.parent.mkdir(parents=True, exist_ok=True)
     DHCP_CONF.write_text(conf)

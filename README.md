@@ -5,8 +5,11 @@ A web-based file server built with Flask to support **Zero Touch Provisioning (Z
 ## Features
 
 - **File Management** — Upload, download, delete, and move files through a browser UI. Fetch files directly from remote URLs.
-- **ZTP PureSoftwareInstall** — Initiates a Purity software installation on a FlashArray by sending a PATCH request to the array's ZTP endpoint.
+- **ZTP PureSoftwareInstall** — Initiates a Purity software installation on a FlashArray by sending a PATCH request to the array's ZTP endpoint. Check Status auto-refreshes every 15 seconds until complete.
 - **ZTP PureInitialize** — Sends the full initial configuration (networking, DNS, NTP, SMTP, EULA) to an uninitialized FlashArray via the REST API.
+- **ZTE FlashArray Erasure** — Drives the full Zero Touch Erasure workflow: authenticate, start the secure wipe, monitor status, download the sanitization certificate, and finalize with image reinstallation.
+- **DHCP Server** — Assigns IP addresses to FlashArray controllers over a private network (Linux VM / bare-metal only).
+- **FlashArray ZTP Simulator** — Lightweight mock container for testing ZTP workflows without physical hardware.
 
 ## Requirements
 
@@ -135,9 +138,9 @@ sudo systemctl daemon-reload && sudo systemctl restart fileserver
 
 Triggers a Purity package installation on a FlashArray over ZTP.
 
-- **Endpoint used:** `PATCH http://<ct1.eth0 IP>:8081/array-purity-installations`
+- **Endpoint used:** `PATCH http://<ct1.eth1 IP>:8081/array-purity-installations`
 - **Required inputs:**
-  - `ct1.eth0 ZTP IP` — The DHCP-assigned IP address of ct1.eth0 on the array
+  - `ct1.eth1 ZTP IP` — The DHCP-assigned IP address of ct1.eth1 on the array
   - `.ppkg URL` — Full URL to the Purity package file (use **Copy Link** on a file in the UI)
   - `.ppkg.sig URL` — Full URL to the matching signature file
 - **Optional:** DNS nameservers, search domain, and domain can be configured if package URLs use hostnames
@@ -146,18 +149,20 @@ The status panel shows live install progress through these phases:
 
 `Not Started` → `Install In Progress` → `Downloading` → `CT0 Installing` → `CT1 Installing` → `Complete`
 
+Clicking **Check Status** automatically polls every 15 seconds until the status reaches `Complete`. The button changes to **Stop Auto-Refresh** while polling is active; click it again to stop.
+
 ## ZTP PureInitialize
 
 Sends the initial configuration to a factory-fresh FlashArray.
 
 - **Endpoint used:** `PATCH http://<ct1.eth0 IP>:8081/array-initial-config`
 - **Required inputs:**
-  - `ct1.eth0 ZTP IP`
+  - `ct1.eth0 Management IP` — the DHCP-assigned management address after Purity FA is running (not the eth1/eth5 ZTP service address used during software install)
   - FlashArray name
   - IP / Netmask / Gateway for `ct0.eth0`, `ct1.eth0`, and `vir0`
   - NTP servers and timezone
   - EULA acceptance (full name, job title, organization)
-- **Optional:** DNS (domain + nameservers), SMTP relay, alert email addresses
+- **Optional:** DNS (domain + nameservers), SMTP relay, alert email addresses, **Skip Connectivity Tests** (check this for isolated environments with no internet connectivity — adds `skip_connectivity_tests: true` to the payload)
 
 > **RC4 arrays** (using ETH4/5 as management ports): toggle **ETH4 / VIR4** in the Interface Mode selector. This switches the payload keys to `ct0.eth4`, `ct1.eth4`, and `vir4` as required.
 
@@ -218,7 +223,52 @@ http://<server-ip>:8080/download/<path/to/file>
 
 The **Copy Link** button in the UI copies this URL to the clipboard, ready to paste into the ZTP PureSoftwareInstall package path fields.
 
+### Copy Link IP Override
+
+If your server has two network interfaces (e.g. a management NIC and a separate ZTP/DHCP NIC), the Copy Link URL defaults to the IP your browser is connected to — which may not be reachable by the FlashArray. Use the **Copy Link IP Override** field in the Files action bar to set the IP of the interface connected to the FlashArray network. All Copy Link URLs will use that IP instead. The value is saved in browser localStorage and persists across page loads.
+
 > **Note:** The `files/` directory is excluded from this repository (`.gitignore`) due to the large size of Purity `.ppkg` firmware bundles (~5–6 GB each).
+
+## ZTE FlashArray Erasure
+
+Drives the full Zero Touch Erasure (ZTE) workflow to securely wipe a FlashArray and return it to a factory-fresh, ZTP-redeployable state. Requires Purity//FA 6.6.8 or later.
+
+> **Destructive operation:** ZTE permanently erases all data and configuration. Complete the pre-erasure checklist displayed in the UI before starting.
+
+### Pre-erasure checklist (required before ZTE will succeed)
+
+The ZTE start request will fail immediately if any of these conditions are not met:
+
+- **Disable SafeMode** — must be off before ZTE can proceed
+- **Disconnect all hosts** — remove host connections and host entries
+- **Delete and eradicate all volumes and snapshots** (excluding system volumes)
+- **Delete and eradicate all protection groups (pgroups)** and pgroup snapshots
+- **Delete and eradicate all pods**
+- **Remove all array connections** — replication and pod stretch targets
+- **Remove offload targets** — NFS, S3, Azure
+- **Delete file systems, shares, directory services, and Active Directory configuration**
+- **Confirm authorization and business approval**
+
+> Deletion alone is not enough — volumes, snapshots, pgroups, and pods must be explicitly **eradicated** (not just deleted) before ZTE will proceed.
+
+### Workflow
+
+**Phase 1 — Start the secure wipe**
+
+1. Enter the Array Management VIP, API Version (default `2.56`), and API Token, then click **Authenticate** to obtain a session token.
+2. Select **Dark-site array** if the array cannot reach Pure Storage for the phone-home check.
+3. Click **Start ZTE Wipe** — confirm the prompt. The array begins wiping all drives and generating a sanitization certificate (~30 minutes).
+4. Click **Check Wipe Status** — auto-refreshes every 30 seconds. Status progresses to `waiting_for_finalize` when Phase 1 is complete.
+5. When status is `waiting_for_finalize`, use **Copy Certificate** or **Download Certificate** to save the sanitization certificate to a secure location before finalizing.
+
+**Phase 2 — Finalize and reinstall**
+
+1. Select image source: **Phoning-home** (`image_source: auto`) or **Dark-site** (provide a URL or `file:///` path to the ZTE image bundle).
+2. Click **Finalize & Reinstall Image** — confirm the certificate has been saved. The array reinstalls the Purity image (~40 minutes). The REST API will be unavailable during this phase.
+3. After reinstallation, verify the array is in an uninitialized state and the ZTP endpoint responds. Proceed with ZTP PureSoftwareInstall and ZTP PureInitialize as needed.
+
+- **Endpoint used:** `https://<array-mgmt-vip>/api/<version>/arrays/erasures`
+- **Cancel ZTE:** Click **Cancel ZTE** to send `DELETE /arrays/erasures` if the operation needs to be aborted.
 
 ## Service Management
 

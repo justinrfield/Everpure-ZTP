@@ -12,6 +12,23 @@ if command -v apt-get &>/dev/null; then
     apt-get update -qq
 fi
 
+# Install Python 3 if not present
+if ! command -v python3 &>/dev/null; then
+    echo "[+] Installing Python 3..."
+    if command -v dnf &>/dev/null; then
+        dnf install -y python3
+    elif command -v yum &>/dev/null; then
+        yum install -y python3
+    elif command -v apt-get &>/dev/null; then
+        apt-get install -y python3
+    else
+        echo "[!] Could not install Python 3 — install it manually and re-run this script."
+        exit 1
+    fi
+else
+    echo "[+] Python 3 already installed: $(python3 --version)"
+fi
+
 # Install Flask if not present
 if ! python3 -c "import flask" 2>/dev/null; then
     echo "[+] Installing Flask..."
@@ -81,7 +98,7 @@ Type=simple
 User=root
 WorkingDirectory=${SCRIPT_DIR}
 Environment=FILE_SERVER_ROOT=${SCRIPT_DIR}/files
-ExecStart=/usr/bin/python3 ${SCRIPT_DIR}/app.py
+ExecStart=$(command -v python3) ${SCRIPT_DIR}/app.py
 Restart=on-failure
 RestartSec=5
 
